@@ -1,6 +1,7 @@
 package im.ous.delici.android.contactfix;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -49,6 +50,7 @@ public final class ContactFix extends Activity
 				
 				progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
 				progress.setTitle("Processing");
+				progress.setMessage("Contact Name");
 				progress.setCancelable(false);
 				progress.setProgress(0);
 				progress.setMax(contacts.getCount());
@@ -57,11 +59,11 @@ public final class ContactFix extends Activity
 				
 				new ProcessContactsTask() {
 					@Override
-					protected void onProgressUpdate(ContactFixProgress... values) {
+					protected void onProgressUpdate(final ContactFixProgress... values) {
 						super.onProgressUpdate(values);
 						ContactFixProgress last = values[values.length-1];
 						progress.setProgress(last.position);
-						progress.setMessage("Processing "+last.name);
+						progress.setMessage(last.name);
 					}
 					
 					@Override
@@ -112,20 +114,38 @@ public final class ContactFix extends Activity
 		@Override
 		protected Void doInBackground(Cursor... params) {
 			Cursor contacts = params[0];
+			ArrayList<ContentProviderOperation> operations = new ArrayList<ContentProviderOperation>();
 			while(contacts.moveToNext()) {
 				String id = contacts.getString(contacts.getColumnIndex(ContactsContract.Contacts._ID));
 	        	String name = contacts.getString(contacts.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
 	        	
-				publishProgress(new ContactFixProgress(contacts.getPosition(),name));
+	        	if((!operations.isEmpty() && operations.size() > 40)) {
+	        		flushOperations(operations);
+	        		operations = new ArrayList<ContentProviderOperation>();
+	        		//publishProgress(new ContactFixProgress(contacts.getPosition(),name));
+	        	}
+	        	
+	        	publishProgress(new ContactFixProgress(contacts.getPosition(),name));
 				
 				processContact(id, name);
 			}
+			flushOperations(operations);
 			
 			return null;
 		}
+		void flushOperations(ArrayList<ContentProviderOperation> ops) {
+			if(ops.isEmpty()) {
+				return;
+			}
+			try {
+				getContentResolver().applyBatch(ContactsContract.AUTHORITY, ops); //Seriously? you need ArrayList specifically?...
+			} catch (Exception e) {
+				Log.e(TAG, "Could not apply batch",e);
+			}
+		}
 		
-		private void processContact(String id, String name) {
-        	Log.v(TAG,"Fixing contact "+id+", name "+name);
+		void processContact(String id, String name) {
+        	Log.v(TAG,"Contact "+id+", name "+name);
         	
         	Cursor phones = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI , null, ContactsContract.CommonDataKinds.Phone.CONTACT_ID +" = ?", new String[] {id}, null);
         	ArrayList<ContentProviderOperation> phoneOps = new ArrayList<ContentProviderOperation>(phones.getCount());
@@ -138,7 +158,7 @@ public final class ContactFix extends Activity
         			Log.v(TAG,"Phone number already in format: "+phoneNumber);
         			continue;
         		}
-        		Log.v(TAG,"Transforming "+phoneNumber+" to "+target);
+        		Log.v(TAG,"Fixing Phone Number:::: "+phoneNumber+" to "+target);
         		
         		String where = ContactsContract.Data.MIMETYPE + " = '" + ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE + "'" +
         						" AND "+ContactsContract.Data._ID+" = ?";
@@ -149,11 +169,6 @@ public final class ContactFix extends Activity
 				phoneOps.add(update);
         	}
         	phones.close();
-        	try {
-				getContentResolver().applyBatch(ContactsContract.AUTHORITY, phoneOps);
-			} catch (Exception e) {
-				Log.e(TAG, "Could not apply batch",e);
-			}
 		}
     }
 
