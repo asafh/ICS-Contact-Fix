@@ -1,7 +1,6 @@
 package im.ous.delici.android.contactfix;
 
 import java.util.ArrayList;
-import java.util.List;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -57,6 +56,7 @@ public final class ContactFix extends Activity
 				progress.show();
 				
 				
+				
 				new ProcessContactsTask() {
 					@Override
 					protected void onProgressUpdate(final ContactFixProgress... values) {
@@ -67,7 +67,7 @@ public final class ContactFix extends Activity
 					}
 					
 					@Override
-			    	protected void onPostExecute(Void result) {
+			    	protected void onPostExecute(Integer result) {
 			    		super.onPostExecute(result);
 			    		
 			    		try {
@@ -87,7 +87,7 @@ public final class ContactFix extends Activity
 						try {
 							new AlertDialog.Builder(ContactFix.this)
 								.setTitle("Processing Done")
-								.setMessage("End of Contacts")
+								.setMessage(result + " Phone numbers changed.")
 								.setNeutralButton(android.R.string.ok, null)
 								.show();
 						}
@@ -110,35 +110,40 @@ public final class ContactFix extends Activity
 			this.name = name;
     	}
     }
-    class ProcessContactsTask extends AsyncTask<Cursor, ContactFixProgress, Void> {
-		@Override
-		protected Void doInBackground(Cursor... params) {
+    class ProcessContactsTask extends AsyncTask<Cursor, ContactFixProgress, Integer> {
+    	final ArrayList<ContentProviderOperation> operations;
+    	int count;
+    	public ProcessContactsTask() {
+			operations = new ArrayList<ContentProviderOperation>();
+			count = 0;
+		}
+    	@Override
+		protected Integer doInBackground(Cursor... params) {
 			Cursor contacts = params[0];
-			ArrayList<ContentProviderOperation> operations = new ArrayList<ContentProviderOperation>();
 			while(contacts.moveToNext()) {
 				String id = contacts.getString(contacts.getColumnIndex(ContactsContract.Contacts._ID));
 	        	String name = contacts.getString(contacts.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
 	        	
-	        	if((!operations.isEmpty() && operations.size() > 40)) {
-	        		flushOperations(operations);
-	        		operations = new ArrayList<ContentProviderOperation>();
-	        		//publishProgress(new ContactFixProgress(contacts.getPosition(),name));
+	        	processContact(id, name);
+	        	
+	        	if(operations.size() > 30) {
+	        		flushOperations();
 	        	}
 	        	
 	        	publishProgress(new ContactFixProgress(contacts.getPosition(),name));
-				
-				processContact(id, name);
 			}
-			flushOperations(operations);
+			flushOperations();
 			
-			return null;
+			return count;
 		}
-		void flushOperations(ArrayList<ContentProviderOperation> ops) {
-			if(ops.isEmpty()) {
+		void flushOperations() {
+			if(operations.isEmpty()) {
 				return;
 			}
 			try {
-				getContentResolver().applyBatch(ContactsContract.AUTHORITY, ops); //Seriously? you need ArrayList specifically?...
+				getContentResolver().applyBatch(ContactsContract.AUTHORITY, operations); //Seriously? you need ArrayList specifically?...
+				count += operations.size();
+				operations.clear();
 			} catch (Exception e) {
 				Log.e(TAG, "Could not apply batch",e);
 			}
@@ -148,16 +153,15 @@ public final class ContactFix extends Activity
         	Log.v(TAG,"Contact "+id+", name "+name);
         	
         	Cursor phones = getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI , null, ContactsContract.CommonDataKinds.Phone.CONTACT_ID +" = ?", new String[] {id}, null);
-        	ArrayList<ContentProviderOperation> phoneOps = new ArrayList<ContentProviderOperation>(phones.getCount());
         	while(phones.moveToNext()) {
         		String phoneID = phones.getString(phones.getColumnIndex(ContactsContract.CommonDataKinds.Phone._ID));
         		String phoneNumber = phones.getString(phones.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
         		String target = PhoneNumberUtils.formatNumber(phoneNumber);
         		
-        		if(phoneNumber.equals(target)) {
+        		/*if(phoneNumber.equals(target)) {
         			Log.v(TAG,"Phone number already in format: "+phoneNumber);
         			continue;
-        		}
+        		}*/
         		Log.v(TAG,"Fixing Phone Number:::: "+phoneNumber+" to "+target);
         		
         		String where = ContactsContract.Data.MIMETYPE + " = '" + ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE + "'" +
@@ -166,7 +170,7 @@ public final class ContactFix extends Activity
 				ContentProviderOperation update = ContentProviderOperation.newUpdate(ContactsContract.Data.CONTENT_URI)
 							.withSelection(where, new String[] {phoneID})
 							.withValue(ContactsContract.CommonDataKinds.Phone.NUMBER, target).build();
-				phoneOps.add(update);
+				operations.add(update);
         	}
         	phones.close();
 		}
