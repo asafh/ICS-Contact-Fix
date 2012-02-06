@@ -36,7 +36,7 @@ public final class ContactFix extends Activity
         
         
         WebView webView = (WebView) findViewById(R.id.webView1);
-        webView.loadUrl("http://delici.ous.im");
+        webView.loadUrl("http://delici.ous.im/?inApp=true");
         
         mDoMagic = (Button) findViewById(R.id.magic);
         
